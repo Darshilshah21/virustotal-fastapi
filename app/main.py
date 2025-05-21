@@ -1,13 +1,12 @@
 from fastapi import FastAPI
-from app.api.routes import router as api_router
-from app.models.database import Base, engine
-from app.models import tables
+from app.api.routes import router
+from app.tasks.ingest import ingest_all_data
+from app.models.database import create_tables
 
-Base.metadata.create_all(bind=engine)
+app = FastAPI()
+app.include_router(router)
 
-app = FastAPI(title="VirusTotal Data Pipeline")
-app.include_router(api_router)
-
-@app.get("/")
-def root():
-    return {"message": "Welcome to the VirusTotal API Wrapper"}
+@app.on_event("startup")
+def startup_event():
+    create_tables()
+    ingest_all_data()  # Optional: you can control this via env/flag

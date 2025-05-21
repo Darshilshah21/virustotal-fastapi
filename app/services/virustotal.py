@@ -1,17 +1,46 @@
-import httpx
-from app.config import VT_API_KEY
+import requests
+import json
+from datetime import datetime
+from app.models.tables import VirusTotalRecord
 
-def fetch_virustotal_data(identifier: str):
-    base_url = "https://www.virustotal.com/api/v3/"
-    if "." in identifier:
-        url = f"{base_url}domains/{identifier}"
-    elif len(identifier) == 64:
-        url = f"{base_url}files/{identifier}"
+API_KEY = "YOUR_VIRUSTOTAL_API_KEY"
+BASE_URL = "https://www.virustotal.com/api/v3/"
+
+def detect_type(identifier: str):
+    if "." in identifier and not identifier.replace(".", "").isdigit():
+        return "domain"
+    elif identifier.replace(".", "").isdigit():
+        return "ip"
     else:
-        url = f"{base_url}ip_addresses/{identifier}"
+        return "file"
 
-    headers = {"x-apikey": VT_API_KEY}
-    response = httpx.get(url, headers=headers)
+def fetch_from_api(identifier: str):
+    id_type = detect_type(identifier)
+    url = f"{BASE_URL}{id_type}s/{identifier}"
+    headers = {"x-apikey": API_KEY}
+    response = requests.get(url, headers=headers)
     if response.status_code == 200:
-        return response.json().get("data")
-    return None
+        return id_type, response.json()
+    return None, None
+
+def fetch_and_save(identifier: str, db):
+    id_type, json_data = fetch_from_api(identifier)
+    if not json_data:
+        return False
+
+    attributes = json.dumps(json_data.get("data", {}).get("attributes", {}))
+    record = db.query(VirusTotalRecord).filter_by(identifier=identifier).first()
+
+    if record:
+        record.attributes = attributes
+        record.last_fetched = datetime.utcnow()
+    else:
+        record = VirusTotalRecord(
+            identifier=identifier,
+            data_type=id_type,
+            attributes=attributes,
+            last_fetched=datetime.utcnow()
+        )
+        db.add(record)
+    db.commit()
+    return True
